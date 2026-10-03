@@ -3,6 +3,7 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 require('dotenv').config();
 
 const app = express();
@@ -11,12 +12,14 @@ const PORT = process.env.PORT || 5000;
 const rootDir = path.join(__dirname, '..');
 const uploadDir = path.join(rootDir, 'uploads');
 const outputDir = path.join(rootDir, 'outputs');
+const pythonScriptsDir = path.join(rootDir, '..', 'video-processor');
 
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '200mb' }));
+app.use(express.urlencoded({ limit: '200mb' }));
 app.use('/uploads', express.static(uploadDir));
 app.use('/outputs', express.static(outputDir));
 
@@ -25,85 +28,85 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (_req, file, cb) {
+    const timestamp = Date.now();
     const safeName = file.originalname.replace(/\s+/g, '_');
-    cb(null, `${Date.now()}-${safeName}`);
+    cb(null, `${timestamp}-${safeName}`);
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
 
 const jobs = new Map();
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, app: 'shorty-edit-free', status: 'healthy' });
+  res.json({ ok: true, app: 'shorty-edit-free', status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-app.post('/api/videos/upload', upload.array('files', 50), (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ ok: false, error: 'No files uploaded.' });
+app.post('/api/edits/create', upload.fields([{ name: 'files', maxCount: 50 }, { name: 'audio', maxCount: 1 }]), (req, res) => {
+  try {
+    const { prompt = 'Create a clean, professional reel.', style = 'Cinematic' } = req.body;
+    const videoFiles = req.files?.files || [];
+    const audioFile = req.files?.audio?.[0];
+
+    if (!videoFiles.length) {
+      return res.status(400).json({ ok: false, error: 'No video/image files provided.' });
+    }
+
+    const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    const jobData = {
+      jobId,
+      status: 'processing',
+      progress: 0,
+      description: prompt,
+      stylePreset: style,
+      videoFiles: videoFiles.map((f) => ({ name: f.filename, path: f.path, size: f.size })),
+      audioFile: audioFile ? { name: audioFile.filename, path: audioFile.path } : null,
+      downloadUrl: null,
+      error: null,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      completedAt: null,
+      duration: null,
+    };
+
+    jobs.set(jobId, jobData);
+
+    // Simulate progress updates (replace with real Python call later)
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+      const job = jobs.get(jobId);
+      if (!job) {
+        clearInterval(progressInterval);
+        return;
+      }
+
+      progress += Math.random() * 15;
+      if (progress >= 100) {
+        clearInterval(progressInterval);
+        job.progress = 100;
+        job.status = 'completed';
+        job.downloadUrl = `/outputs/${jobId}.mp4`;
+        job.completedAt = new Date().toISOString();
+        // Create a mock MP4 file
+        fs.writeFileSync(path.join(outputDir, `${jobId}.mp4`), Buffer.from('mock mp4 data'));
+        return;
+      }
+
+      job.progress = Math.min(Math.floor(progress), 99);
+      job.startedAt = new Date().toISOString();
+    }, 1500);
+
+    res.json({
+      ok: true,
+      ...jobData,
+    });
+
+    console.log(`[Job ${jobId}] Created with ${videoFiles.length} video(s) and style "${style}"`);
+  } catch (error) {
+    console.error('Error in /api/edits/create:', error);
+    res.status(500).json({ ok: false, error: error.message });
   }
-
-  const savedFiles = req.files.map((file) => ({
-    name: file.originalname,
-    filename: file.filename,
-    path: `/uploads/${file.filename}`,
-    size: file.size,
-  }));
-
-  res.json({ ok: true, files: savedFiles });
-});
-
-app.post('/api/edits/create', (req, res) => {
-  const { description, stylePreset = 'Cinematic', files = [] } = req.body;
-
-  if (!files || files.length === 0) {
-    return res.status(400).json({ ok: false, error: 'No files provided.' });
-  }
-
-  const jobId = `job_${Date.now()}`;
-
-  jobs.set(jobId, {
-    jobId,
-    status: 'processing',
-    progress: 0,
-    description: description || 'Create a clean product-style reel.',
-    stylePreset,
-    downloadUrl: null,
-    createdAt: new Date().toISOString(),
-  });
-
-  const interval = setInterval(() => {
-    const current = jobs.get(jobId);
-    if (!current) {
-      clearInterval(interval);
-      return;
-    }
-
-    if (current.progress >= 100) {
-      clearInterval(interval);
-      current.status = 'completed';
-      current.downloadUrl = `/outputs/${jobId}.mp4`;
-      current.progress = 100;
-      return;
-    }
-
-    current.progress = Math.min(current.progress + 12, 100);
-    if (current.progress >= 100) {
-      current.status = 'completed';
-      current.downloadUrl = `/outputs/${jobId}.mp4`;
-      current.progress = 100;
-    }
-  }, 1500);
-
-  res.json({
-    ok: true,
-    jobId,
-    status: 'processing',
-    progress: 0,
-    description: description || 'Create a clean product-style reel.',
-    stylePreset,
-    message: 'AI job queued successfully.',
-  });
 });
 
 app.get('/api/edits/:jobId/status', (req, res) => {
@@ -112,26 +115,26 @@ app.get('/api/edits/:jobId/status', (req, res) => {
     return res.status(404).json({ ok: false, error: 'Job not found.' });
   }
 
-  res.json({
-    ok: true,
-    jobId: job.jobId,
-    status: job.status,
-    progress: job.progress,
-    description: job.description,
-    stylePreset: job.stylePreset,
-    downloadUrl: job.downloadUrl,
-  });
+  res.json({ ok: true, ...job });
 });
 
 app.get('/api/edits/:jobId/download', (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job || !job.downloadUrl) {
-    return res.status(404).json({ ok: false, error: 'No render available yet.' });
+    return res.status(404).json({ ok: false, error: 'Render not available yet.' });
   }
 
   res.json({ ok: true, downloadUrl: job.downloadUrl });
 });
 
+app.get('/api/jobs', (_req, res) => {
+  const allJobs = Array.from(jobs.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ ok: true, jobs: allJobs });
+});
+
 app.listen(PORT, () => {
-  console.log(`Shorty backend listening on http://localhost:${PORT}`);
+  console.log(`\n🎬 Shorty Editor Backend`);
+  console.log(`📡 Listening on http://localhost:${PORT}`);
+  console.log(`📁 Uploads: ${uploadDir}`);
+  console.log(`📁 Outputs: ${outputDir}\n`);
 });
