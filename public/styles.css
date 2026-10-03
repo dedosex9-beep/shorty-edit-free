@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shorty Edit Free</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">🎬</div>
+          <div>
+            <div class="brand-name">Shorty</div>
+            <div class="brand-sub">Easy AI Reel Maker</div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span class="chip">Mockups + music + reels</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="left-panel">
+          <h1>Make a reel from your mockups.</h1>
+          <p class="lead">
+            Upload your PNGs and music. Shorty turns them into a clean 30-second reel and exports a real MP4.
+          </p>
+
+          <form id="reel-form" enctype="multipart/form-data">
+            <label class="field-label">Upload mockup images</label>
+            <input id="images" type="file" name="images" accept="image/*" multiple />
+
+            <label class="field-label">Upload music (optional)</label>
+            <input id="audio" type="file" name="audio" accept="audio/*" />
+
+            <label class="field-label">Prompt</label>
+            <textarea id="prompt" name="prompt" rows="5">Create a polished 30-second fashion reel from my mockups. Keep it premium, realistic, smooth, and synced to the rhythm of the music. Use cinematic transitions and product focus shots.</textarea>
+
+            <label class="field-label">Style</label>
+            <div class="style-row">
+              <button type="button" class="style-btn active" data-style="Cinematic">Cinematic</button>
+              <button type="button" class="style-btn" data-style="Luxury">Luxury</button>
+              <button type="button" class="style-btn" data-style="Minimal">Minimal</button>
+              <button type="button" class="style-btn" data-style="Trendy">Trendy</button>
+            </div>
+
+            <input type="hidden" id="style-value" name="style" value="Cinematic" />
+
+            <button type="submit" class="primary-btn">Make My Reel</button>
+          </form>
+        </section>
+
+        <aside class="right-panel">
+          <div id="status-box" class="status-box neutral">
+            <strong>Ready</strong>
+            <p>Upload 10 t-shirt mockups and one music track.</p>
+          </div>
+
+          <div class="preview-panel">
+            <h3>Files selected</h3>
+            <ul id="file-list" class="file-list"></ul>
+          </div>
+
+          <div class="preview-panel">
+            <h3>Render output</h3>
+            <div id="result-box" class="result-box empty">
+              <p>No reel rendered yet.</p>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
