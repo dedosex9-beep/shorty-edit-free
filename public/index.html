@@ -1,189 +1,76 @@
-const express = require('express');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shorty - Beat-Sync Reel Maker</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🎬</div>
+        <div>
+          <div class="brand-name">Shorty</div>
+          <div class="brand-sub">Beat-Sync Reel Maker</div>
+        </div>
+      </div>
+      <span class="badge">Premium Vertical Video</span>
+    </header>
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const rootDir = __dirname;
-const uploadsDir = path.join(rootDir, 'uploads');
-const outputsDir = path.join(rootDir, 'outputs');
-const jobsDir = path.join(rootDir, 'jobs');
+    <main class="layout">
+      <section class="panel left">
+        <h1>Create a premium reel from your mockups.</h1>
+        <p class="subtitle">Upload product images and music. Shorty detects the beat, syncs your shots, applies cinematic effects, and exports a professional 30-second vertical reel.</p>
 
-fs.mkdirSync(uploadsDir, { recursive: true });
-fs.mkdirSync(outputsDir, { recursive: true });
-fs.mkdirSync(jobsDir, { recursive: true });
+        <form id="reel-form" enctype="multipart/form-data">
+          <label class="field-label">📸 Product Mockups</label>
+          <input type="file" id="images" name="images" accept="image/png,image/jpeg,image/jpg" multiple required />
+          <p class="help-text">PNG or JPG. Upload in order (first image = first shot)</p>
 
-const jobs = new Map();
+          <label class="field-label">🎵 Music Track</label>
+          <input type="file" id="audio" name="audio" accept="audio/mpeg,audio/wav,audio/aac,audio/mp4" required />
+          <p class="help-text">MP3, WAV, or AAC. Should be 15-60 seconds</p>
 
-const storage = multer.diskStorage({
-  destination: uploadsDir,
-  filename: (req, file, cb) => {
-    const cleanName = file.originalname.replace(/\s+/g, '_');
-    cb(null, `${Date.now()}-${cleanName}`);
-  },
-});
+          <label class="field-label">🎨 Visual Style</label>
+          <div class="style-buttons">
+            <button type="button" class="style-btn active" data-style="Cinematic">🎬 Cinematic</button>
+            <button type="button" class="style-btn" data-style="Luxury">✨ Luxury</button>
+            <button type="button" class="style-btn" data-style="Trendy">⚡ Trendy</button>
+          </div>
+          <input type="hidden" id="style-value" value="Cinematic" />
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 500 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const isImage = file.mimetype.startsWith('image/');
-    const isAudio = file.mimetype.startsWith('audio/');
-    if (isImage || isAudio) return cb(null, true);
-    cb(new Error('Only image and audio files are allowed.'));
-  },
-});
+          <button type="submit" class="btn-primary" id="submit-btn">🚀 Generate Reel</button>
+        </form>
+      </section>
 
-app.use(express.static(path.join(rootDir, 'public')));
-app.use('/outputs', express.static(outputsDir));
-app.use('/uploads', express.static(uploadsDir));
+      <aside class="panel right">
+        <div id="status" class="status-box neutral">
+          <strong>Ready</strong>
+          <p>Upload your mockups and music to start.</p>
+        </div>
 
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, app: 'Shorty Edit Free', status: 'healthy' });
-});
+        <div id="progress-box" class="progress-box" style="display: none;">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <p id="progress-text" class="progress-text">0%</p>
+        </div>
 
-app.post('/api/create-reel', upload.fields([
-  { name: 'images', maxCount: 50 },
-  { name: 'audio', maxCount: 1 },
-]), (req, res) => {
-  try {
-    const uploadedImages = req.files?.images || [];
-    const uploadedAudio = req.files?.audio?.[0] || null;
-    const prompt = req.body.prompt || 'Create a professional reel from my mockups.';
-    const style = req.body.style || 'Cinematic';
+        <div id="beats-box" class="beats-box" style="display: none;">
+          <h3>🎵 Beat Map</h3>
+          <div class="beat-map" id="beat-map"></div>
+          <p class="beat-info" id="beat-info"></p>
+        </div>
 
-    if (!uploadedImages.length) {
-      return res.status(400).json({ ok: false, error: 'Please upload at least one image.' });
-    }
+        <div id="result" class="result-box empty">
+          <p>Your reel will appear here.</p>
+        </div>
+      </aside>
+    </main>
+  </div>
 
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const jobDir = path.join(jobsDir, jobId);
-    const imageDir = path.join(jobDir, 'images');
-    fs.mkdirSync(imageDir, { recursive: true });
-
-    uploadedImages
-      .slice()
-      .sort((a, b) => a.originalname.localeCompare(b.originalname))
-      .forEach((file, index) => {
-        const ext = path.extname(file.originalname) || '.png';
-        const targetName = `frame_${String(index + 1).padStart(2, '0')}${ext}`;
-        const targetPath = path.join(imageDir, targetName);
-        fs.copyFileSync(file.path, targetPath);
-        fs.unlinkSync(file.path);
-      });
-
-    if (uploadedAudio) {
-      const audioTarget = path.join(jobDir, 'audio' + path.extname(uploadedAudio.originalname));
-      fs.copyFileSync(uploadedAudio.path, audioTarget);
-      fs.unlinkSync(uploadedAudio.path);
-    }
-
-    const outputFile = path.join(outputsDir, `${jobId}.mp4`);
-
-    const job = {
-      id: jobId,
-      status: 'processing',
-      progress: 5,
-      prompt,
-      style,
-      outputUrl: null,
-      createdAt: new Date().toISOString(),
-      imageCount: uploadedImages.length,
-      hasAudio: !!uploadedAudio,
-      error: null,
-    };
-
-    jobs.set(jobId, job);
-
-    const ffmpegArgs = [
-      '-y',
-      '-framerate', '1/3',
-      '-pattern_type', 'glob',
-      '-i', path.join(imageDir, '*.png').replace(/\\/g, '/'),
-      '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=30',
-      '-c:v', 'libx264',
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-      outputFile,
-    ];
-
-    if (uploadedAudio) {
-      ffmpegArgs.splice(0, 0, '-y');
-      const audioPath = path.join(jobDir, 'audio' + path.extname(uploadedAudio.originalname));
-      ffmpegArgs.splice(0, 0, '-i', audioPath);
-      // Rebuild args with audio included after image sequence
-      const audioArgs = [
-        '-y',
-        '-framerate', '1/3',
-        '-pattern_type', 'glob',
-        '-i', path.join(imageDir, '*.png').replace(/\\/g, '/'),
-        '-i', audioPath,
-        '-filter_complex',
-        '[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[f0];[f0]fps=30[v0];[1:a]aformat=sample_rates=48000:channel_layouts=stereo[a1];[v0][a1]concat=n=1:v=1:a=1[outv][outa]',
-        '-map', '[outv]',
-        '-map', '[outa]',
-        '-shortest',
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-movflags', '+faststart',
-        outputFile,
-      ];
-      ffmpegArgs.length = 0;
-      audioArgs.forEach((arg) => ffmpegArgs.push(arg));
-    }
-
-    const ffmpeg = spawn(ffmpegPath, ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-
-    ffmpeg.stderr.on('data', (chunk) => {
-      const text = chunk.toString();
-      const match = text.match(/time=(\d{2}:\d{2}:\d{2}\.\d+)/);
-      if (match) {
-        const timeValue = match[1];
-        const parts = timeValue.split(':').map(Number);
-        const seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-        const approx = Math.min(95, Math.max(10, Math.round((seconds / 30) * 100)));
-        job.progress = approx;
-      }
-    });
-
-    ffmpeg.on('close', (code) => {
-      const current = jobs.get(jobId);
-      if (!current) return;
-
-      if (code === 0 && fs.existsSync(outputFile)) {
-        current.status = 'completed';
-        current.progress = 100;
-        current.outputUrl = `/outputs/${path.basename(outputFile)}`;
-      } else {
-        current.status = 'failed';
-        current.error = 'Video rendering failed.';
-      }
-    });
-
-    res.json({ ok: true, jobId, status: 'processing', progress: 5, message: 'Creating your reel...' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ ok: false, error: error.message || 'Unexpected server error.' });
-  }
-});
-
-app.get('/api/jobs/:jobId', (req, res) => {
-  const job = jobs.get(req.params.jobId);
-  if (!job) {
-    return res.status(404).json({ ok: false, error: 'Job not found.' });
-  }
-  res.json({ ok: true, job });
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(rootDir, 'public', 'index.html'));
-});
-
-app.listen(PORT, () => {
-  console.log(`Shorty Edit Free is running on http://localhost:${PORT}`);
-  console.log(`FFmpeg path: ${ffmpegPath}`);
-});
+  <script src="/app.js"></script>
+</body>
+</html>
